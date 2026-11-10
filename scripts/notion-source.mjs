@@ -142,6 +142,7 @@ async function downloadMedia(url, outputDir, slug) {
 }
 
 function mediaBlock(token) {
+  if (!token.map || (token.type !== 'inline' && token.type !== 'html_block')) return null;
   if (token.type === 'inline' && token.children.length === 1
     && token.children[0].type === 'image' && token.map[1] === token.map[0] + 1) {
     const image = token.children[0];
@@ -149,7 +150,6 @@ function mediaBlock(token) {
     if (url && isNotionMedia(url)) return { type: 'image', label: image.content, url };
   }
 
-  if (token.type !== 'inline' && token.type !== 'html_block') return null;
   const tag = mediaTag.exec(token.content.trim());
   if (!tag) return null;
   const [, type, attributes, caption] = tag;
