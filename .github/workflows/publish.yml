@@ -1,0 +1,84 @@
+name: Publish blog from Notion
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '8,23,38,53 * * * *'
+  push:
+    branches: [master]
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/master' && vars.NOTION_DATA_SOURCE_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.digest.outputs.value }}
+      deploy: ${{ steps.digest.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci --ignore-scripts
+      - name: Build published posts
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+        run: |
+          test -n "$NOTION_TOKEN" || { echo 'Set the NOTION_TOKEN Actions secret first.'; exit 1; }
+          npm run build
+      - name: Read last deployed digest
+        uses: actions/cache/restore@v5
+        with:
+          path: .last-pages-digest
+          key: notion-pages-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: notion-pages-v1-
+      - name: Check whether the site changed
+        id: digest
+        working-directory: _site
+        run: |
+          set -o pipefail
+          digest=$(find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1)
+          echo "value=$digest" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" != schedule || ! -f ../.last-pages-digest || $(cat ../.last-pages-digest) != "$digest" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/upload-pages-artifact@v4
+        if: steps.digest.outputs.deploy == 'true'
+        with:
+          path: _site
+
+  deploy:
+    if: needs.build.outputs.deploy == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
+      - name: Record successful deployment
+        env:
+          PAGES_DIGEST: ${{ needs.build.outputs.digest }}
+        run: printf '%s\n' "$PAGES_DIGEST" > .last-pages-digest
+      - uses: actions/cache/save@v5
+        with:
+          path: .last-pages-digest
+          key: notion-pages-v1-${{ github.run_id }}-${{ github.run_attempt }}
