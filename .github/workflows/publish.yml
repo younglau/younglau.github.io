@@ -37,6 +37,17 @@ jobs:
           for name in NOTION_TOKEN NOTION_DATA_SOURCE_ID VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
             [[ -n "${!name}" ]] || { echo "Configure $name before enabling publishing."; exit 1; }
           done
+          if [[ ${#VERCEL_TOKEN} -lt 20 ]]; then
+            echo 'The VERCEL_TOKEN secret does not contain a complete access token.'
+            exit 1
+          fi
+          status=$(curl --silent --show-error --max-time 15 --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID")
+          if [[ "$status" != 200 ]]; then
+            echo "Vercel did not authorize access to the configured project (HTTP $status)."
+            exit 1
+          fi
           [[ $(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type) == workflow ]] || {
             echo 'Set the GitHub Pages publishing source to GitHub Actions.'
             exit 1
